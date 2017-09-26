@@ -1,0 +1,21 @@
+fileFormatVersion: 2
+guid: 55073b9f6f06bd049b5a01a0e635a553
+timeCreated: 1506374471
+licenseType: Free
+TrueTypeFontImporter:
+  serializedVersion: 4
+  fontSize: 16
+  forceTextureCase: -2
+  characterSpacing: 0
+  characterPadding: 1
+  includeFontData: 1
+  fontName: Shrikhand
+  fontNames:
+  - Shrikhand
+  fallbackFontReferences: []
+  customCharacters: 
+  fontRenderingMode: 0
+  ascentCalculationMode: 1
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
