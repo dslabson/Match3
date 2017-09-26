@@ -179,7 +179,8 @@ public class GridItemsGenerator : MonoBehaviour
         Start();
     }
 #endif
-    
+
+#if UNITY_EDITOR
     private void Reset()
     {
         itemPrefab = Resources.Load("GridItem") as GameObject;
@@ -204,4 +205,5 @@ public class GridItemsGenerator : MonoBehaviour
         Awake();
         Start();
     }
+#endif
 }
