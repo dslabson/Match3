@@ -2,7 +2,7 @@
 using UnityEngine.Events;
 using static AnimationManager;
 
-public class ItemsGroupAnimation : AnimationSystem
+public class ItemsGroupAnimation : MovementAnimationSystem
 {
     public static UnityEvent OnFinish = new UnityEvent();
     public UnityEvent OnFinishForInstance = new UnityEvent();
@@ -12,15 +12,8 @@ public class ItemsGroupAnimation : AnimationSystem
 
     public override void ChangePosition(Vector2 destination, AnimationType animType = null)
     {
-        lock (syncLock)
-        {
-            if (movingItems.Count > 2)
-                return;
-        }
-
-
-        this.animType = animType == null ? AnimManager.FallDownItems : animType;
-        StartAnimation(destination, animType.Duration);
+        this.animType = animType ?? AnimManager.FallDownItems;
+        base.ChangePosition(destination, animType);
     }
 
 
@@ -30,18 +23,16 @@ public class ItemsGroupAnimation : AnimationSystem
         return animType.Curve.Evaluate(timer / time);
     }
 
-
-    protected override void EndFunction()
+    protected override void OnAnimationFinish()
     {
         OnFinishForInstance.Invoke();
-
-        if (movingItems.Count == 0)
+        
+        lock (SyncLock)
         {
-            lock (syncLock)
-            {
-                if (movingItems.Count == 0)
-                    OnFinish.Invoke();
-            }
+            if (AnimatingObjects.Count == 0)
+                OnFinish.Invoke();
         }
+
+        base.OnAnimationFinish();
     }
 }

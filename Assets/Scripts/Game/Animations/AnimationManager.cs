@@ -47,12 +47,18 @@ public class AnimationManager : MonoBehaviour
     [SerializeField]
     private AnimationType reshuffleItems;
     public AnimationType ReshuffleItems { get { return reshuffleItems; } }
-    
+
+    [Space(10)]
+    [SerializeField]
+    private AnimationType addedPointsFadeInOut;
+    public AnimationType AddedPointsFadeInOut { get { return addedPointsFadeInOut; } }
+
 
     private void Reset()
     {
         swapItems = new AnimationType(0.15f);
         fallDownItems = new AnimationType(0.2f);
         reshuffleItems = new AnimationType(0.2f);
+        addedPointsFadeInOut = new AnimationType(1.5f);
     }
 }

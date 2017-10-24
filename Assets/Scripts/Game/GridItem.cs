@@ -5,6 +5,7 @@ using static GameplayController;
 public class GridItem : MonoBehaviour
 {
     public ItemType Type { get; set; }
+    /// <summary>Position in the grid</summary>
     public IntVector2 Position { get; set; }
 
     private Animator animator;
@@ -26,23 +27,25 @@ public class GridItem : MonoBehaviour
 
     public float PlayDestroyAnim()
     {
-        //Now item has only one anim, so it does the job.
+        //Now item has only one anim (Animator), so it does the job.
         animator.enabled = true;
         GetComponent<SpriteRenderer>().sortingOrder = 10;
         return animator.GetCurrentAnimatorClipInfo(0)[0].clip.length;
     }
 
 
-    public void Move(Vector2 dir, bool undo = false)
+    /// <summary>Swap items</summary>
+    /// <param name="undo">if this parameter is true, the swap will be reversed (when after the swap, match not exists)</param>
+    public void Move(Vector2 direction, bool undo = false)
     {
         int newPositionXorY;
-        if (!CanMove(dir, out newPositionXorY))
+        if (!CanMove(direction, out newPositionXorY))
             return;
 
         GridItem itemNeighbor;
 
         //Horizontal
-        if (IsHorizontalDirection(dir))
+        if (IsHorizontalDirection(direction))
         {
             itemNeighbor = Gameplay.GridItems[newPositionXorY, Position.y];
 
@@ -64,6 +67,7 @@ public class GridItem : MonoBehaviour
             Position = new IntVector2(Position.x, newPositionXorY);
         }
 
+        //Swap items
         Vector2 newPositionOnScene = itemNeighbor.transform.position;
         itemNeighbor.sawpAnim.ChangePosition(transform.position, undo, AnimationManager.AnimManager.SwapItems);
         sawpAnim.ChangePosition(newPositionOnScene, undo, AnimationManager.AnimManager.SwapItems);
@@ -75,30 +79,27 @@ public class GridItem : MonoBehaviour
     }
     
 
-    private bool CanMove(Vector2 dir, out int newPosition)
+    private bool CanMove(Vector2 direction, out int newPosition)
     {
-        if (IsHorizontalDirection(dir))
+        if (IsHorizontalDirection(direction))
         {
-            newPosition = Position.x + (int)Mathf.Sign(dir.x);
+            newPosition = Position.x + (int)Mathf.Sign(direction.x);
             if (newPosition >= Gameplay.GridItems.GetLength(0) || newPosition < 0)
                 return false;
         }
         else
         {
-            newPosition = Position.y + (int)Mathf.Sign(dir.y);
+            newPosition = Position.y + (int)Mathf.Sign(direction.y);
             if (newPosition >= Gameplay.GridItems.GetLength(1) || newPosition < 0)
                 return false;
         }
 
-        return !(AnimationSystem.movingItems.Count > 0);
+        return !(MovementAnimationSystem.animatingObjects.Count > 0);
     }
 
 
-    private bool IsHorizontalDirection(Vector2 dir)
+    private bool IsHorizontalDirection(Vector2 direction)
     {
-        if (Mathf.Abs(dir.x) > Mathf.Abs(dir.y))
-            return true;
-        else
-            return false;
+        return Mathf.Abs(direction.x) > Mathf.Abs(direction.y);
     }
 }

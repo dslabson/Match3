@@ -1,15 +1,10 @@
-﻿/**To do:
- * - Object pooling.
- * - Change Invoke on own method.
- * - Another thread for checking matches.
-**/
-
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Events;
 using static SwapItemsSystem;
 using static GridItemsGenerator;
 using static AnimationManager;
+using static UIController;
 
 public class GameplayController : MonoBehaviour
 {
@@ -42,10 +37,10 @@ public class GameplayController : MonoBehaviour
         }
     }
     #endregion
-
     
     public GridItem[,] GridItems { get; set; }
     public int Points { get; private set; }
+    public int Moves { get; private set; }
     public bool InputBlocked { get; set; } = false;
 
     /** int -> x position, List<int> -> list of y positions. For example:
@@ -53,28 +48,19 @@ public class GameplayController : MonoBehaviour
     *** and generate 3 items on top.
     **/
     private Dictionary<int, List<int>> positionsForNewItems = new Dictionary<int, List<int>>();
-    //All matches
-    private List<GridItem> matchesItems = new List<GridItem>();
-    //Parent of generated items
-    private GameObject grid;
-    //Helps with changing kinds of reshuffle
-    private int switchReshuffle = 0;
-    bool existsPossibleMatch = false;
+    private List<GridItem> matchesItems = new List<GridItem>(); //All matches.
+    private GameObject grid; //Parent of generated items.
+    private int switchReshuffle = 0; //Helps with changing kinds of reshuffle.
+    private bool existsPossibleMatch = false;
 
 
     private void Awake()
     {
         grid = GameObject.FindGameObjectWithTag("Grid");
 
-        SwapItemsAnimation.OnFinish.AddListener(OnFinishSwap);
+        SwapItemsAnimation.OnFinish.AddListener(OnSwapFinish);
         SwapItemsAnimation.OnFinish.AddListener(CheckMove);
-        ItemsGroupAnimation.OnFinish.AddListener(new UnityAction(() => Invoke("CheckMatches", 0.1f)));
-    }
-
-
-    public void OnFinishSwap()
-    {
-        CheckMatches(IntVector2.Zero, true);
+        ItemsGroupAnimation.OnFinish.AddListener(OnItemsFallDownFinish);
     }
 
 
@@ -94,7 +80,7 @@ public class GameplayController : MonoBehaviour
 
         CheckMatchesOnField(field, skipReshuffle);
         
-        if (matchesItems.Count >= 3 && AnimationSystem.movingItems.Count == 0)
+        if (matchesItems.Count >= 3 && MovementAnimationSystem.animatingObjects.Count == 0)
         {
             int points = (int)(Mathf.Pow(matchesItems.Count, 2) * 10);
             AddPionts(points);
@@ -245,12 +231,13 @@ public class GameplayController : MonoBehaviour
     }
 
 
+    /// <summary>Verify that the coordinates are within the boundary of the board</summary>
     private bool InsideBorders(params IntVector2[] coordinates)
     {
         int gridItemsXLenght = GridItems.GetLength(0);
         int gridItemsYLenght = GridItems.GetLength(1);
 
-        //I am use "for" loop instead of foreach for GB oprimization
+        //Use "for" loop instead of foreach for GB oprimization :)
         int lenght = coordinates.Length;
         for (int i = 0; i < lenght; i++)
         {
@@ -260,19 +247,11 @@ public class GameplayController : MonoBehaviour
             }
         }
 
-        /**foreach
-        foreach (IntVector2 co in coordinates)
-        {
-            if (co.x >= gridItemsXLenght || co.y >= gridItemsYLenght || co.x < 0 || co.y < 0)
-            {
-                return false;
-            }
-        }**/
-
         return true;
     }
 
 
+    ///<summary>Add to matchesItems (list) items which the list doesn't contain.</summary>
     private void AddToMatchesItemsIfNotExist(params GridItem[] gridItems)
     {
         int lenght = gridItems.Length;
@@ -283,18 +262,10 @@ public class GameplayController : MonoBehaviour
                 matchesItems.Add(gridItems[i]);
             }
         }
-
-        /**foreach
-        foreach (GridItem item in gridItems)
-        {
-            if (!matchesItems.Contains(item))
-            {
-                matchesItems.Add(item);
-            }
-        }**/
     }
 
 
+    ///<summary>Add to PositionsForNewItems (dictionary) positions which the dictionary doesn't contain.</summary>
     private void AddToPositionsForNewItemsIfNotExist(params IntVector2[] positions)
     {
         int lenght = positions.Length;
@@ -312,26 +283,10 @@ public class GameplayController : MonoBehaviour
                 }
             }
         }
-
-        /**foreach
-        foreach (IntVector2 position in positions)
-        {
-            if (!positionsForNewItems.ContainsKey(position.x))
-            {
-                positionsForNewItems.Add(position.x, new List<int> { position.y });
-            }
-            else
-            {
-                if (!positionsForNewItems[position.x].Contains(position.y))
-                {
-                    positionsForNewItems[position.x].Add(position.y);
-                }
-            }
-        }**/
     }
 
 
-    //Animation
+    ///<summary>Animations destroying</summary>
     private void DestroyMatchesAndSpawnNewItems()
     {
         float animDuration = 0;
@@ -341,17 +296,18 @@ public class GameplayController : MonoBehaviour
             animDuration = matchesItems[i].PlayDestroyAnim();
         }
         
-        Invoke("DestroyMatches", animDuration);
+        this.Invoke(DestroyMatches, animDuration);
     }
 
-    //Physical destroying
+
+    ///<summary>"Objects destroying" - it means: hide an object and add to object pool to regenerate.</summary>
     private void DestroyMatches()
     {
         for (int i = 0; i < matchesItems.Count; i++)
         {
-            SwapSystem.spriteRenderers.Remove(matchesItems[i].GetComponent<SpriteRenderer>());
             GridItems[matchesItems[i].Position.x, matchesItems[i].Position.y] = null;
-            Destroy(matchesItems[i].gameObject);
+            matchesItems[i].gameObject.SetActive(false);
+            ItemsGenerator.itemsToRegenerate.Enqueue(matchesItems[i]);
         }
 
         SpawnNewItems();
@@ -401,45 +357,47 @@ public class GameplayController : MonoBehaviour
                 itemsToMove[numberOfDestroyedItems].Add(GridItems[x, i]);
             }
         }
-        
+
         MoveItems(itemsToMove, false, AnimManager.FallDownItems);
     }
 
 
-    //Move down items (animation)
+    ///<summary>Move items. For example: Matches has been destroyed and new items has been generated on top, so all items have to move down</summary>
+    ///<param name="itemsToMove">int -> y or x position to move, List(GridItems) -> list of items to move. For example: move down items in list about key(int) positions down</param>
     private void MoveItems(Dictionary<int, List<GridItem>> itemsToMove, bool horizontal = false, AnimationType animType = null)
     {
         foreach (int numberOfPositionToMove in itemsToMove.Keys)
         {
-            GameObject tmpGo = new GameObject("Wrapper " + numberOfPositionToMove);
-            tmpGo.transform.SetParent(grid.transform);
-            ItemsGroupAnimation anim = tmpGo.AddComponent<ItemsGroupAnimation>();
-            anim.OnFinishForInstance.AddListener(new UnityAction(() => ResetParentTmp(itemsToMove[numberOfPositionToMove], grid, tmpGo)));
+            //Create object that will be temporary parent for items to move all items in one object.
+            GameObject tempParent = new GameObject("Wrapper " + numberOfPositionToMove);
+            tempParent.transform.SetParent(grid.transform);
 
-
+            ItemsGroupAnimation anim = tempParent.GetOrAddComponent<ItemsGroupAnimation>();
+            anim.OnFinishForInstance.AddListener(new UnityAction(() => ResetParentTmp(itemsToMove[numberOfPositionToMove], grid, tempParent)));
+            
             int lenght = itemsToMove[numberOfPositionToMove].Count;
             for(int i = 0; i < lenght; i++)
             {
-                itemsToMove[numberOfPositionToMove][i].transform.SetParent(tmpGo.transform);
+                itemsToMove[numberOfPositionToMove][i].transform.SetParent(tempParent.transform);
             }
 
             if(horizontal)
             {
                 float distance = ItemsGenerator.DistanceBetweenItems.x * numberOfPositionToMove;
-                anim.ChangePosition(new Vector2(tmpGo.transform.position.x - distance, tmpGo.transform.position.y), animType);
+                anim.ChangePosition(new Vector2(tempParent.transform.position.x - distance, tempParent.transform.position.y), animType);
             }
             else
             {
                 float distance = ItemsGenerator.DistanceBetweenItems.y * numberOfPositionToMove;
-                anim.ChangePosition(new Vector2(tmpGo.transform.position.x, tmpGo.transform.position.y - distance), animType);
+                anim.ChangePosition(new Vector2(tempParent.transform.position.x, tempParent.transform.position.y - distance), animType);
             }
             
         }
     }
 
 
-    //Destroys temporary parent for items. Parent has been used to move down items in one object.
-    private void ResetParentTmp(List<GridItem> items, GameObject grid, GameObject tmpGo)
+    ///<summary>Destroys temporary parent for items. For example: parent has been used to move down items in one object and now items have to have parent as grid again.</summary>
+    private void ResetParentTmp(List<GridItem> items, GameObject grid, GameObject temp)
     {
         int lenght = items.Count;
         for(int i = 0; i < lenght; i++)
@@ -447,7 +405,19 @@ public class GameplayController : MonoBehaviour
             items[i].transform.SetParent(grid.transform);
         }
 
-        Destroy(tmpGo);
+        Destroy(temp);
+    }
+
+
+    private void OnSwapFinish()
+    {
+        CheckMatches(IntVector2.Zero, true);
+    }
+
+
+    private void OnItemsFallDownFinish()
+    {
+        this.Invoke(CheckMatches, 0.1f);
     }
 
 
@@ -456,7 +426,11 @@ public class GameplayController : MonoBehaviour
         if (matchesItems.Count < 3)
         {
             InputBlocked = true;
-            Invoke("UndoMove", 0.1f);
+            this.Invoke(UndoMove, 0.1f);
+        }
+        else
+        {
+            AddMove();
         }
     }
 
@@ -470,17 +444,25 @@ public class GameplayController : MonoBehaviour
     private void AddPionts(int points)
     {
         Points += points;
-        UIController.UI.ChangePoints(Points.ToString());
+        UI.UpdatePoints(points);
+    }
+
+
+    private void AddMove()
+    {
+        Moves++;
+        UI.TextMoves.text = Moves.ToString();
     }
 
 
     private void Reshuffle()
     {
-        //int -> number of position to move (x or y), List<GridItem> -> list of items to move about this(key) positions.
-        Dictionary<int, List<GridItem>> itemsToMove = new Dictionary<int, List<GridItem>>();
+        //int -> number of position to move (x or y), List<GridItem> -> list of items to move about key(int) positions.
+        Dictionary <int, List<GridItem>> itemsToMove = new Dictionary<int, List<GridItem>>();
         itemsToMove.Add(1, new List<GridItem>());
         itemsToMove.Add(-1, new List<GridItem>());
 
+        //if reshuffle has finished and possible match still doesn't exist, reshuffle again in another way. The value means kind of the way.
         switchReshuffle = switchReshuffle > 5 ? 0 : switchReshuffle + 1;
 
         int LenghtY = GridItems.GetLength(1);
@@ -504,7 +486,7 @@ public class GameplayController : MonoBehaviour
                         continue;
                     }
 
-                    //Changing items position
+                    //Changing items position.
                     GridItem item = GridItems[x, y];
                     GridItems[x, y] = GridItems[x, y + 1];
                     GridItems[x, y].Position = new IntVector2(x, y);
@@ -513,7 +495,7 @@ public class GameplayController : MonoBehaviour
                     itemsToMove[-1].Add(GridItems[x, y + 1]);
                     itemsToMove[1].Add(GridItems[x, y]);
 
-                    #if UNITY_EDITOR
+                    #if UNITY_EDITOR || BUILD_DEBUG
                     GridItems[x, y].UpdateGameObjectName();
                     GridItems[x, y + 1].UpdateGameObjectName();
                     #endif
@@ -541,7 +523,7 @@ public class GameplayController : MonoBehaviour
                         continue;
                     }
 
-                    //Changing items position
+                    //Changing items position.
                     GridItem item = GridItems[x, y];
                     GridItems[x, y] = GridItems[x + 1, y];
                     GridItems[x, y].Position = new IntVector2(x, y);
@@ -550,7 +532,7 @@ public class GameplayController : MonoBehaviour
                     itemsToMove[-1].Add(GridItems[x + 1, y]);
                     itemsToMove[1].Add(GridItems[x, y]);
 
-                    #if UNITY_EDITOR
+                    #if UNITY_EDITOR || BUILD_DEBUG
                     GridItems[x, y].UpdateGameObjectName();
                     GridItems[x + 1, y].UpdateGameObjectName();
                     #endif

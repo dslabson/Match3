@@ -35,7 +35,8 @@ public class SwapItemsSystem : MonoBehaviour
 
     public float deadZone = 30;
 
-    [HideInInspector] public List<SpriteRenderer> spriteRenderers = new List<SpriteRenderer>();
+    [HideInInspector]
+    public List<SpriteRenderer> spriteRenderers = new List<SpriteRenderer>();
     private GridItem lastSwipedItem = null;
     private GridItem swipedItem = null;
 
@@ -68,7 +69,7 @@ public class SwapItemsSystem : MonoBehaviour
     private void OnBeginDrag()
     {
         //Wait for end of swap
-        if (swiping || AnimationSystem.movingItems.Count > 0 || GameplayController.Gameplay.InputBlocked)
+        if (swiping || MovementAnimationSystem.IsAnimatingSomeObject() || GameplayController.Gameplay.InputBlocked)
             return;
 
         mouseBeginPositon = Input.mousePosition;
@@ -76,7 +77,7 @@ public class SwapItemsSystem : MonoBehaviour
         Vector3 screenToWorldPoint = Camera.main.ScreenToWorldPoint(mouseBeginPositon);
         Vector3 mousePosition = new Vector3(screenToWorldPoint.x, screenToWorldPoint.y, 0);
 
-        //Check if and which item was clicked
+        //Check if and which item has been swiped
         foreach (SpriteRenderer spriteRenderer in spriteRenderers)
         {
             if (spriteRenderer.bounds.Contains(mousePosition))
@@ -88,13 +89,13 @@ public class SwapItemsSystem : MonoBehaviour
     private void OnDrag()
     {
         //Wait for end of swap
-        if (swiping || swipedItem == null || GameplayController.Gameplay.InputBlocked)
+        if (swiping || swipedItem == null || GameplayController.Gameplay.InputBlocked || MovementAnimationSystem.IsAnimatingSomeObject())
             return;
         
         mouseCurrentPosition = Input.mousePosition;
         mouseDistanceBetweenPositions = mouseCurrentPosition - mouseBeginPositon;
 
-        //Mouse move must overcome a certain distance to works swap
+        //Mouse move must overcome a certain distance to allow swap
         if (Mathf.Abs(mouseDistanceBetweenPositions.x) < deadZone && Mathf.Abs(mouseDistanceBetweenPositions.y) < deadZone)
             return;
 

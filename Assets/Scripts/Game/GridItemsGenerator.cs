@@ -1,11 +1,11 @@
 ﻿using UnityEngine;
 using static GameplayController;
+using System.Collections.Generic;
 
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
 
-[RequireComponent(typeof(SwapItemsSystem))]
 public class GridItemsGenerator : MonoBehaviour
 {
     #region Singleton
@@ -48,17 +48,25 @@ public class GridItemsGenerator : MonoBehaviour
     public Vector2 itemsDimensions;
     [Range(0, 1)]
     public float spaceBetweenItems;
-
+    
+    //Object pooling
+    public Queue<GridItem> itemsToRegenerate = new Queue<GridItem>();
+    
 
     //Awake() and Start() are public for editor script
     public void Awake()
     {
+        if (boardDimensions.x < 3)
+            boardDimensions.x = 3;
+        if (boardDimensions.y < 3)
+            boardDimensions.y = 3;
+
         Gameplay.GridItems = new GridItem[boardDimensions.x, boardDimensions.y];
         DistanceBetweenItems = GetDistanceBetweedItems();
 
         #if UNITY_EDITOR
         if(!Application.isPlaying)
-            Gameplay.GetComponent<SwapItemsSystem>().spriteRenderers.Clear();
+            SwapItemsSystem.SwapSystem.spriteRenderers.Clear();
         #endif
     }
 
@@ -67,24 +75,45 @@ public class GridItemsGenerator : MonoBehaviour
         itemPrefab.transform.localScale = itemsDimensions;
 
         Generate(boardDimensions);
+
         if(Application.isPlaying)
             Gameplay.CheckMatches();
     }
 
-
-    public void GenerateNewItem(int x, int y, float yMR = 0, bool canMatch = false)
+    
+    /// <param name="yAboveTopBorder">y and yAboveTopBorder will be a sum of item y pos. You can use this parameter if you want to spawn item above grid (for generate new items) </param>
+    /// <param name="canMatch">If this parameter is true, it's possible generate items with matches immediately after generating</param>
+    public void GenerateNewItem(int x, int y, float yAboveTopBorder = 0, bool canMatch = false)
     {
-        GridItem item = Gameplay.GridItems[x, y] = Instantiate(itemPrefab, new Vector3(0, 100, 0), Quaternion.identity).GetComponent<GridItem>();
-        SpriteRenderer spriteRenderer = item.GetComponent<SpriteRenderer>();
+        GridItem item;
+        SpriteRenderer spriteRenderer;
 
-        Gameplay.GetComponent<SwapItemsSystem>().spriteRenderers.Add(spriteRenderer);
-
+        if (itemsToRegenerate.Count == 0)
+        {
+            //Generate new item
+            item = Gameplay.GridItems[x, y] = Instantiate(itemPrefab, new Vector3(0, 100, 0), Quaternion.identity).GetComponent<GridItem>();
+            spriteRenderer = item.GetComponent<SpriteRenderer>();
+            SwapItemsSystem.SwapSystem.spriteRenderers.Add(spriteRenderer);
+        }
+        else
+        {
+            //Use destroyed item
+            item = Gameplay.GridItems[x, y] = itemsToRegenerate.Dequeue();
+            item.GetComponent<Animator>().enabled = false;
+            item.gameObject.SetActive(true);
+            spriteRenderer = item.GetComponent<SpriteRenderer>();
+            spriteRenderer.sortingOrder = 0;
+        }
+        
+        //Postition in the grid.
         item.Position = new IntVector2(x, y);
+        
+        bool xMinusOneSameType;
+        bool xMinusTwoSameType;
+        bool yMinusOneSameType;
+        bool yMinusTwoSameType;
 
-        bool yCorrected = true;
-        bool xMinusOneSameType = true;
-        bool xMinusTwoSameType = true;
-        while ((xMinusOneSameType && xMinusTwoSameType) || !yCorrected)
+        do
         {
             item.Type = GetRandomGridItemType();
 
@@ -93,34 +122,26 @@ public class GridItemsGenerator : MonoBehaviour
 
             //Prevents generating 3 items with the same type (Prevents match)
             //Vertical
-            if (y > 1)
-            {
-                bool yMinusOneSameType = Gameplay.GridItems[x, y - 1].Type == item.Type;
-                bool yMinusTwoSameType = Gameplay.GridItems[x, y - 2].Type == item.Type;
-
-                if (yMinusOneSameType && yMinusTwoSameType)
-                    yCorrected = false;
-                else
-                    yCorrected = true;
-            }
-            else
-                yCorrected = true;
+            yMinusOneSameType = y > 1 ? Gameplay.GridItems[x, y - 1].Type.Id == item.Type.Id : false;
+            yMinusTwoSameType = y > 1 ? Gameplay.GridItems[x, y - 2].Type.Id == item.Type.Id : false;
 
             //Horizontal
-            xMinusOneSameType = x > 1 ? Gameplay.GridItems[x - 1, y].Type == item.Type : false;
-            xMinusTwoSameType = x > 1 ? Gameplay.GridItems[x - 2, y].Type == item.Type : false;
+            xMinusOneSameType = x > 1 ? Gameplay.GridItems[x - 1, y].Type.Id == item.Type.Id : false;
+            xMinusTwoSameType = x > 1 ? Gameplay.GridItems[x - 2, y].Type.Id == item.Type.Id : false;
         }
+        while ((xMinusOneSameType && xMinusTwoSameType) || (yMinusOneSameType && yMinusTwoSameType));
 
-        #if UNITY_EDITOR
-        item.UpdateGameObjectName();
+        #if UNITY_EDITOR || BUILD_DEBUG
+            item.UpdateGameObjectName();
         #endif
 
+        //Set item position on scene.
         item.transform.SetParent(parentOfItems);
         item.transform.localScale = new Vector3(itemsDimensions.x, itemsDimensions.y, 1);
 
         Vector2 DistanceBetweenItems = GetDistanceBetweedItems();
         float posX = DistanceBetweenItems.x * (x - (boardDimensions.x / 2.0f)) + (DistanceBetweenItems.x / 2.0f);
-        float posY = DistanceBetweenItems.y * ((y + yMR) - (boardDimensions.y / 2.0f)) + (DistanceBetweenItems.y / 2.0f);
+        float posY = DistanceBetweenItems.y * ((y + yAboveTopBorder) - (boardDimensions.y / 2.0f)) + (DistanceBetweenItems.y / 2.0f);
         item.transform.localPosition = new Vector3(posX, posY);
 
         spriteRenderer.sprite = item.Type.Sprite;
@@ -128,6 +149,8 @@ public class GridItemsGenerator : MonoBehaviour
     }
 
 
+    /// <summary>Generate items</summary>
+    /// <param name="dimensions">Grid dimensions, amount of items vertical and horizontal</param>
     private void Generate(IntVector2 dimensions)
     {
         parentOfItems.RemoveChilds();
@@ -172,7 +195,7 @@ public class GridItemsGenerator : MonoBehaviour
 
 
 
-#if !UNITY_2017_1_1 //Unity 2017.1 bug, works correctly in Unity 5, probably fixed in Unity 2017_2
+#if UNITY_EDITOR && !UNITY_2017_1_1 //Unity 2017.1 bug, works correctly in Unity 5, fixed in Unity 2017.2
     private void OnValidate()
     {
         Awake();
